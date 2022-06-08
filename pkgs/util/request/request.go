@@ -28,7 +28,7 @@ func  (c *reqr) Setheads(k map[string]string) *reqr {
 	return c
 }
 
-func (c *reqr) notparse() *reqr {
+func (c *reqr) Notparse() *reqr {
 	c.Clientr.SetDoNotParseResponse(true)
 	return c
 }
@@ -95,6 +95,12 @@ func Parsebody_to_json(resp *resty.Response) map[string]interface{} {
 	json.Unmarshal(resp.Body(),&v)
 	return v.(map[string]interface{})
 }
+
+func Ecocde_json(v any)([]byte,error) {
+	e,err:=json.Marshal(v)
+	return e,err
+} 
+
 
 //func tojson(resp *resty.Response,err error) interface{} {
 //	if err != nil{

@@ -1,7 +1,8 @@
 package cmd
 import (
-	"fmt"
 	"github.com/spf13/cobra"
+	"go_pull/pkgs/util/logtool"
+
 	"os"
 )
 var rootCmd = &cobra.Command{
@@ -14,7 +15,7 @@ var rootCmd = &cobra.Command{
 }
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		logtool.Fatalerror(err)
 		os.Exit(1)
 	}
 }
