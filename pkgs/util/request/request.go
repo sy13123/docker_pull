@@ -39,6 +39,8 @@ func (c *reqr) Settls() *reqr {
 	return c
 }
 
+
+
 func (c *reqr) Get() (*resty.Response, error) {
 	return c.Clientr.Get(c.Url)
 }

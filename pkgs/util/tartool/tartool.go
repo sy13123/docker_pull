@@ -22,9 +22,9 @@ func TarGzWrite( _dpath,_spath string, tw *tar.Writer, fi os.FileInfo ) {
   defer fr.Close()
 
   h := new( tar.Header )
-  fmt.Println( _dpath+"/"+_spath)
-  _p := strings.Split(_dpath,"/")
-  h.Name =_p[len(_p)-1]+"/"+_spath
+  //_p := strings.Split(_dpath,"/")
+  //h.Name =_p[len(_p)-1]+"/"+_spath
+  h.Name =_spath
   h.Size = fi.Size()
   h.Mode = int64( fi.Mode() )
   h.ModTime = fi.ModTime()

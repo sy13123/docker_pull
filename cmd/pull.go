@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"sync"
 	"encoding/json"
 	"fmt"
 	"go_pull/pkgs/model"
@@ -12,10 +13,13 @@ import (
 	"go_pull/pkgs/util/makestr"
 	"go_pull/pkgs/util/request"
 	"go_pull/pkgs/util/tartool"
+	"go_pull/pkgs/util/timetool"
+
 	"io"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/spf13/cobra"
@@ -25,8 +29,11 @@ var (
 	auth_url    string
 	reg_service string
 	repository  string
+	auth_head   map[string]string
 	resp        *resty.Response
 	err         error
+	registry string
+
 )
 
 func init() {
@@ -67,7 +74,6 @@ func startpull(args []string) {
 	}
 
 	// Docker client doesn't seem to consider the first element as a potential registry unless there is a '.' or ':'
-	var registry string
 	var repo string
 	if len(imgparts) > 1 && (strings.Contains(imgparts[0], "@") || strings.Contains(imgparts[0], ":")) {
 		registry = imgparts[0]
@@ -101,7 +107,7 @@ func startpull(args []string) {
 		}
 	}
 	//Fetch manifest v2 and get image layer digests
-	auth_head := get_auth_head("application/vnd.docker.distribution.manifest.v2+json")
+	auth_head = get_auth_head("application/vnd.docker.distribution.manifest.v2+json")
 	resp, err := request.Requests(makestr.Joinstring("https://", registry, "/v2/", repository, "/manifests/", tag)).
 		Setheads(auth_head).
 		Settls().
@@ -111,7 +117,7 @@ func startpull(args []string) {
 		logtool.SugLog.Infof("[-] Cannot fetch manifest for %v [HTTP %v]", repository, resp.Status())
 		logtool.SugLog.Info(resp)
 		auth_head = get_auth_head(
-			"application/vnd.docker.distribution.manifest.list.v2+json")
+			"application/vnd.docker.distribution.manifest.list.v2+json",auth_head)
 		resp, err = request.Requests(
 			makestr.Joinstring("https://", registry, "/v2/", repository, "/manifests/", tag)).
 			Setheads(auth_head).
@@ -168,90 +174,20 @@ func startpull(args []string) {
 	}
 
 	//Build layer folders
-
+	var wg sync.WaitGroup
+	wg = sync.WaitGroup{}
+	wg.Add(len(layers))
+	
 	var parentid string
-
-	for _, layer := range layers {
+	var last_fake_layerid string
+	for x, layer := range layers {
 		ublob := layer.(map[string]interface{})["digest"].(string)
 		fake_layerid := aes.Sha256t(makestr.Joinstring(parentid, "\n", ublob, "\n"))
 		layerdir := makestr.Joinstring(imgdir, "/", fake_layerid)
 		os.Mkdir(layerdir, os.ModePerm)
-
-		//Creating VERSION file
-		f := iowrite.Uflie(makestr.Joinstring(layerdir, "/VERSION"))
-		f.BufWriter.WriteString("1.0")
-		f.Close()
-
-		// Creating layer.tar file
-		logtool.SugLog.Infof("%v%v", ublob[7:19], ": Downloading...")
-		os.Stdout.Sync()
-		auth_head = get_auth_head("application/vnd.docker.distribution.manifest.v2+json")
-		bresp, err := request.Requests(
-			makestr.Joinstring("https://", registry, "/v2/", repository, "/blobs/", ublob)).
-			Notparse().
-			Setheads(auth_head).
-			Settls().
-			Get()
-
-		logtool.Fatalerror(err)
-		if bresp.StatusCode() != 200 {
-			logtool.SugLog.Fatal(layer.(map[string]interface{}))
-			bresp, _ := request.Requests(layer.(map[string]interface{})["urls"].([]string)[0]).
-				Setheads(auth_head).
-				Settls().
-				Get()
-			if bresp.StatusCode() != 200 {
-				fmt.Printf("\rERROR: Cannot download layer %v [HTTP %v %v]", ublob[7:19], bresp.StatusCode(), bresp.Header()["Content-Length"])
-				logtool.SugLog.Info(bresp)
-				os.Exit(1)
-			}
-
-		} else if bresp.StatusCode() == 200 {
-			goto statusok
-		} else {
-			logtool.SugLog.Info("bad request")
-		}
-	statusok:
-		//Stream download and follow the progress
-		unit, _ := strconv.Atoi(bresp.Header()["Content-Length"][0])
-		unit = unit / 50
-		acc := 0
-		nb_traits := 0
-		progress_bar(ublob, nb_traits)
-		f1 := iowrite.Uflie(makestr.Joinstring(layerdir, "/layer.tar"))
-		buf := make([]byte, 8192)
-		reader := bufio.NewReader(bresp.RawBody())
-
-		for {
-			n, err := reader.Read(buf)
-			f.BufWriter.Write(buf[:n])
-			acc = acc + n
-			if acc > unit {
-				nb_traits = nb_traits + 1
-				progress_bar(ublob, nb_traits)
-				acc = 0
-			}
-			
-			//line, err := reader.ReadBytes('\n')
-			if err != nil {
-				if err == io.EOF {
-					fmt.Println("")
-					logtool.SugLog.Info("ioFinish")
-				} else {
-					logtool.SugLog.Fatal(err, "ioerr")
-				}
-				break
-			}
-		}
-		f1.Close()
-		fmt.Printf("\r%v: Extracting...%v", ublob[7:19], strings.Repeat(" ", 50))
-		os.Stdout.Sync()
-
-		fmt.Printf("%v: Pull complete [%v]\n",
-			ublob[7:19], bresp.Header()["Content-Length"])
-
-		content[0].Layers = append(content[0].Layers, makestr.Joinstring(fake_layerid, "/layer.tar"))
-
+		go Download_img(layer,layerdir,ublob,&wg)
+	
+		content[0].Layers = append(content[0].Layers, makestr.Joinstring(fake_layerid, "/layer_gzip.tar"))
 		//Creating json file
 		f2 := iowrite.Uflie(makestr.Joinstring(layerdir, "/json"))
 		//last layer = config manifest - history - rootfs
@@ -278,12 +214,37 @@ func startpull(args []string) {
 		data, _ := json.Marshal(json_obj)
 		f2.BufWriter.Write(data)
 		f2.Close()
+
+		if x == len(layers){
+			last_fake_layerid = fake_layerid
+		}
+
 	}
+	wg.Wait()
 
 	f3 := iowrite.Uflie(makestr.Joinstring(imgdir, "/manifest.json"))
 	data, _ := json.Marshal(content)
 	f3.BufWriter.Write(data)
 	f3.Close()
+
+
+	var content1 map[string](map[string]string)
+	if len(imgparts[:len(imgparts)-1]) !=0{
+
+		content1 =  map[string](map[string]string){
+			makestr.Joinstring( strings.Join(imgparts[:len(imgparts)-1], "/") ,img) : map[string]string{tag: last_fake_layerid },
+		}
+	}else{
+		content1 =  map[string](map[string]string){
+			img: map[string]string{tag: last_fake_layerid},
+		}
+
+	}
+	
+	f5 := iowrite.Uflie(makestr.Joinstring(imgdir, "/repositories"))
+	data1, _ := json.Marshal(content1)
+	f5.BufWriter.Write(data1)
+	f5.Close()	
 
 	//Create image tar and clean tmp folder
 	//docker_tar:= makestr.Joinstring(
@@ -295,21 +256,124 @@ func startpull(args []string) {
 
 }
 
+
+
+
+
+
+func Download_img(layer interface{},layerdir string,ublob string,w *sync.WaitGroup){
+	
+	//Creating VERSION file
+	f := iowrite.Uflie(makestr.Joinstring(layerdir, "/VERSION"))
+	f.BufWriter.WriteString("1.0")
+	f.Close()
+
+	// Creating layer.tar file
+	logtool.SugLog.Infof("%v%v", ublob[7:19], ": Downloading...")
+	os.Stdout.Sync()
+	auth_head := get_auth_head("application/vnd.docker.distribution.manifest.v2+json",auth_head)
+	bresp, err := request.Requests(
+		makestr.Joinstring("https://", registry, "/v2/", repository, "/blobs/", ublob)).
+		Notparse().
+		Setheads(auth_head).
+		Settls().
+		Get()
+
+	logtool.Fatalerror(err)
+	if bresp.StatusCode() != 200 {
+		logtool.SugLog.Fatal(layer.(map[string]interface{}))
+		bresp, _ := request.Requests(layer.(map[string]interface{})["urls"].([]string)[0]).
+			Setheads(auth_head).
+			Settls().
+			Get()
+		if bresp.StatusCode() != 200 {
+			fmt.Printf("\rERROR: Cannot download layer %v [HTTP %v %v]", ublob[7:19], bresp.StatusCode(), bresp.Header()["Content-Length"])
+			logtool.SugLog.Info(bresp)
+			os.Exit(1)
+		}
+
+	} else if bresp.StatusCode() == 200 {
+		goto statusok
+	} else {
+		logtool.SugLog.Info("bad request")
+	}
+	statusok:
+		//Stream download and follow the progress
+		unit, _ := strconv.Atoi(bresp.Header()["Content-Length"][0])
+		unit = unit / 50
+		acc := 0
+		nb_traits := 0
+		progress_bar(ublob, nb_traits)
+		f1 := iowrite.Uflie(makestr.Joinstring(layerdir, "/layer_gzip.tar"))
+		buf := make([]byte, 8192)
+		reader := bufio.NewReader(bresp.RawBody())
+
+		for {
+			n, err := reader.Read(buf)
+			f1.BufWriter.Write(buf[:n])
+			acc = acc + n
+			if acc > unit {
+				nb_traits = nb_traits + 1
+				progress_bar(ublob, nb_traits)
+				acc = 0
+			}
+			
+			//line, err := reader.ReadBytes('\n')
+			if err != nil {
+				if err == io.EOF {
+					fmt.Println("")
+					logtool.SugLog.Info("ioFinish")
+				} else {
+					logtool.SugLog.Fatal(err, "ioerr")
+				}
+				break
+			}
+		}
+		f1.Close()
+		fmt.Printf("%v: Extracting...%v", ublob[7:19], strings.Repeat(" ", 50))
+		os.Stdout.Sync()
+
+		fmt.Printf("%v: Pull complete [%v]\n",
+			ublob[7:19], bresp.Header()["Content-Length"])
+		(*w).Done()
+}
+
+
+
 // Get Docker token (this function is useless for unauthenticated registries like Microsoft)
-func get_auth_head(qtype string) map[string]string {
+func get_auth_head(qtype string,a ...any ) map[string]string {
+	if len(a) != 0  {
+			t := a[0].(map[string]string)
+			tm:= t["expires_in"]
+			st:= timetool.Strtorime(tm,"UTC")
+			if st.Add(-2*time.Second).After(time.Now().UTC()){
+				return t 
+			}
+	}
 	resp, err := request.Requests(
 		makestr.Joinstring(auth_url, "?service=", reg_service, "&scope=repository:", repository, ":pull")).
 		Settls().
 		Get()
 	logtool.Fatalerror(err)
-	access_token := request.Parsebody_to_json(resp)["token"].(string)
-	auth_head := map[string]string{"Authorization": makestr.Joinstring("Bearer ", access_token), "Accept": qtype}
+	resp_json := request.Parsebody_to_json(resp)
+	expires_in:= int(resp_json["expires_in"].(float64))
+	issued_at := resp_json["issued_at"].(string)
+
+	expires_time := timetool.Strtorime(issued_at,"UTC").
+					Add(time.Duration(expires_in) * (time.Hour)).
+					Format("2006-01-02 15:04:05")
+
+	auth_head := map[string]string{"Authorization": makestr.Joinstring("Bearer ", resp_json["token"].(string)), 
+								   "Accept": qtype,
+								   "expires_in" : expires_time,
+								   }
 	return auth_head
+	
 }
 
 //Docker style progress bar
 func progress_bar(ublob string, nb_traits int) {
-	fmt.Print(makestr.Joinstring("\r", ublob[7:19], ": Downloading ["))
+	fmt.Print(makestr.Joinstring("", ublob[7:19], ": Downloading ["))
 	for i := 0; i < nb_traits; i++ {
 		if i == nb_traits-1 {
 			fmt.Print(">")
@@ -320,6 +384,6 @@ func progress_bar(ublob string, nb_traits int) {
 	for i := 0; i < 49-nb_traits; i++ {
 		fmt.Print(" ")
 	}
-	fmt.Print("]")
+	fmt.Print("]\n")
 	os.Stdout.Sync()
 }
