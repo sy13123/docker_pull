@@ -75,7 +75,5 @@ func TarGz( outFilePath string, inPath string) {
   defer tw.Close()
 
   IterDirectory( inPath,"", tw )
-
-  fmt.Println( "tar.gz ok" )
 }
 

@@ -252,8 +252,12 @@ func startpull(args []string) {
 	//"_",img,".tar")
 	fmt.Print("Creating archive...")
 	os.Stdout.Sync()
-	tartool.TarGz("/tmp/dockertest.tar", imgdir)
 
+	if check_path.Check_path("./dockertest.tar'").Exists() {
+		os.Remove("./dockertest.tar'")
+	}
+	tartool.TarGz("./dockertest.tar", imgdir)
+	os.RemoveAll(imgdir)
 }
 
 
