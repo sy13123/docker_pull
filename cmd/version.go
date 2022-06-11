@@ -15,6 +15,6 @@ var versionCmd = &cobra.Command{
   Short: "Print the version number of pull",
   Long:  `All software has versions. This is pull's`,
   Run: func(cmd *cobra.Command, args []string) {
-    fmt.Println("Hugo Static Site Generator v0.9 -- HEAD")
+    fmt.Println("go_pull version v1")
   },
 }

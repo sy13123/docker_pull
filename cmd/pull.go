@@ -38,7 +38,6 @@ var (
 
 func init() {
 	rootCmd.AddCommand(pullCmd)
-	logtool.InitEvent()
 }
 
 var pullCmd = &cobra.Command{
@@ -51,7 +50,7 @@ var pullCmd = &cobra.Command{
 }
 
 func startpull(args []string) {
-
+	logtool.InitEvent()
 	// Look for the Docker image to download
 
 	imgparts := args
