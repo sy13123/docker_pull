@@ -3,27 +3,26 @@ package request
 import (
 	"crypto/tls"
 	"encoding/json"
+	"os"
+
 	//"fmt"
 	//"os"
 	"github.com/go-resty/resty/v2"
 )
 
-
-
-type reqr struct{
-	Client *resty.Client
+type reqr struct {
+	Client  *resty.Client
 	Clientr *resty.Request
-	resp *resty.Response
-	Url    string
+	resp    *resty.Response
+	Url     string
 }
 
-
-func  (c *reqr) sethead(q string, a string) *reqr {
+func (c *reqr) sethead(q string, a string) *reqr {
 	c.Clientr.SetHeader(q, a)
 	return c
 }
 
-func  (c *reqr) Setheads(k map[string]string) *reqr {
+func (c *reqr) Setheads(k map[string]string) *reqr {
 	c.Clientr.SetHeaders(k)
 	return c
 }
@@ -33,35 +32,36 @@ func (c *reqr) Notparse() *reqr {
 	return c
 }
 
-
 func (c *reqr) Settls() *reqr {
 	c.Client.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
 	return c
 }
 
-
-
 func (c *reqr) Get() (*resty.Response, error) {
 	return c.Clientr.Get(c.Url)
 }
 
-func (c *reqr) setresult(v *interface{}) *reqr{
+func (c *reqr) setresult(v *interface{}) *reqr {
 	//var v interface{}
 	c.Clientr.SetResult(v)
 	return c
-} 
+}
 
 func (c *reqr) post(i ...string) (*resty.Response, error) {
 	return c.Clientr.Post(c.Url)
 }
 
-
-
 func Requests(url string) *reqr {
 	client := resty.New()
+	http_proxy := os.Getenv("http_proxy")
+
+	if http_proxy != "" {
+		println(http_proxy)
+	}
+
 	return &reqr{Client: client,
-		        Clientr: client.R(),
-				Url: url}
+		Clientr: client.R(),
+		Url:     url}
 
 	//
 	//if err != nil {
@@ -87,22 +87,20 @@ func Requests(url string) *reqr {
 	//}
 }
 
-
 func Parsebody_to_json(resp *resty.Response) map[string]interface{} {
 	//if err != nil{
 	//	fmt.Println(err)
 	//	os.Exit(1)
 	//}
 	var v interface{}
-	json.Unmarshal(resp.Body(),&v)
+	json.Unmarshal(resp.Body(), &v)
 	return v.(map[string]interface{})
 }
 
-func Ecocde_json(v any)([]byte,error) {
-	e,err:=json.Marshal(v)
-	return e,err
-} 
-
+func Ecocde_json(v any) ([]byte, error) {
+	e, err := json.Marshal(v)
+	return e, err
+}
 
 //func tojson(resp *resty.Response,err error) interface{} {
 //	if err != nil{

@@ -15,7 +15,7 @@ var rootCmd = &cobra.Command{
 }
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		logtool.Fatalerror(err)
+		logtool.SugLog.Fatal(err)
 		os.Exit(1)
 	}
 }

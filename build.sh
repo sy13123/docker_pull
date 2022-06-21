@@ -3,4 +3,4 @@ export GOOS=linux
 export GOARCH=amd64
 go mod download
 go mod tidy
-go build -o ./build/gopull
+go build -x -o ./build/gopull

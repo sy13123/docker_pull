@@ -14,7 +14,6 @@ import (
 	"go_pull/pkgs/util/request"
 	"go_pull/pkgs/util/tartool"
 	"go_pull/pkgs/util/timetool"
-
 	"io"
 	"os"
 	"strconv"
@@ -35,9 +34,10 @@ var (
 	registry string
 
 )
-
+var platform string
 func init() {
 	rootCmd.AddCommand(pullCmd)
+	pullCmd.PersistentFlags().StringVarP(&platform,"platform","p","amd64","Select platform system architecture")
 }
 
 var pullCmd = &cobra.Command{
@@ -50,41 +50,41 @@ var pullCmd = &cobra.Command{
 }
 
 func startpull(args []string) {
+
 	logtool.InitEvent()
 	// Look for the Docker image to download
-
-	imgparts := args
-	imgparts = strings.Split(args[0], "/")
-
-	last_args_nm := len(imgparts) - 1
-
+	inargv := args
 	var img string
-	//	var repo string= "library"
+	var repo string= "library"
 	var tag string = "latest"
+	var imlist string 
+	var digest string
+ 	var imgpartstr string
+	registry = "registry-1.docker.io"
 
-	if strings.Contains(imgparts[last_args_nm], "@") {
-		s := strings.Split(imgparts[last_args_nm], "@")
-		img, tag = s[0], s[1]
-	} else if strings.Contains(imgparts[last_args_nm], ":") {
-		s := strings.Split(imgparts[last_args_nm], ":")
-		img, tag = s[0], s[1]
+	if strings.Contains(inargv[0], "@") {
+		s := strings.Split(inargv[0], "@")
+		imlist, digest = s[0], s[1]
 	} else {
-		img = imgparts[last_args_nm]
+		imlist, digest = inargv[0],""
 	}
+	
+	if strings.Contains(inargv[0],":"){
+		s := strings.Split(imlist, ":")
+		imgpartstr, tag = s[0],s[1]
+	}else{
+		imgpartstr, tag =imlist,"latest"
+	}
+
+	imgpartlist := strings.Split(imgpartstr, "/")
+	img = imgpartlist[len(imgpartlist)-1]
+
 
 	// Docker client doesn't seem to consider the first element as a potential registry unless there is a '.' or ':'
-	var repo string
-	if len(imgparts) > 1 && (strings.Contains(imgparts[0], "@") || strings.Contains(imgparts[0], ":")) {
-		registry = imgparts[0]
-		repo = strings.Join(imgparts[1:len(imgparts)-2], "/")
-	} else {
-		registry = "registry-1.docker.io"
-		if len(imgparts[:len(imgparts)-1]) != 0 {
-			repo = strings.Join(imgparts[:len(imgparts)-1], "/")
-		} else {
-			repo = "library"
-		}
-	}
+	if len(imgpartlist) > 1 && (strings.Contains(imgpartlist[0], ".") || strings.Contains(imgpartlist[0], ":")) {
+		registry = imgpartlist[0]
+		repo = strings.Join(imgpartlist[1:len(imgpartlist)-1], "/")
+	} 
 	repository = makestr.Joinstring(repo, "/", img)
 
 	//Get Docker authentication endpoint when it is required
@@ -106,12 +106,20 @@ func startpull(args []string) {
 		}
 	}
 	//Fetch manifest v2 and get image layer digests
-	auth_head = get_auth_head("application/vnd.docker.distribution.manifest.v2+json")
-	resp, err := request.Requests(makestr.Joinstring("https://", registry, "/v2/", repository, "/manifests/", tag)).
+
+	var real_tag string
+	if digest != ""{
+		real_tag=digest
+	}else{
+		real_tag=tag
+	}
+	auth_head = get_auth_head("application/vnd.docker.distribution.manifest.list.v2+json")
+	resp, err := request.Requests(makestr.Joinstring("https://", registry, "/v2/", repository, "/manifests/", real_tag)).
 		Setheads(auth_head).
 		Settls().
 		Get()
 	logtool.Errorerror(err)
+
 	if resp.StatusCode() != 200 {
 		logtool.SugLog.Infof("[-] Cannot fetch manifest for %v [HTTP %v]", repository, resp.Status())
 		logtool.SugLog.Info(resp)
@@ -134,6 +142,34 @@ func startpull(args []string) {
 			os.Exit(1)
 		}
 	}
+
+	resp_json :=request.Parsebody_to_json(resp)
+
+	var platformv_list []string
+	var platform_digest string
+	for _,v := range resp_json["manifests"].([]interface{} ) {
+
+		platformv := v.(map[string]interface{})["platform"]
+		platformv = platformv.(map[string]interface{})["architecture"].(string)
+		if platformv == platform{
+			platform_digest = v.(map[string]interface{})["digest"].(string)
+			break
+		}
+		platformv_list = append(platformv_list, platformv.(string))
+	}
+
+	if platform_digest == "" {
+		logtool.SugLog.Fatalf("please use -p %v\n",platformv_list )
+	}
+
+
+	auth_head = get_auth_head("application/vnd.docker.distribution.manifest.v2+json")
+	resp, err = request.Requests(makestr.Joinstring("https://", registry, "/v2/", repository, "/manifests/", platform_digest)).
+		Setheads(auth_head).
+		Settls().
+		Get()
+	logtool.Errorerror(err)
+
 
 	rresp := request.Parsebody_to_json(resp)
 	layers := rresp["layers"].([]interface{})
@@ -160,10 +196,10 @@ func startpull(args []string) {
 	content := model.Contentvar()
 	content[0].Config = makestr.Joinstring(config[7:], ".json")
 
-	if len(imgparts[:len(imgparts)-1]) != 0 {
+	if len(imgpartlist[:len(imgpartlist)-1]) != 0 {
 		content[0].RepoTags = append(
 			content[0].RepoTags,
-			makestr.Joinstring(strings.Join(imgparts[:len(imgparts)-1], "/"), "/", img, ":", tag),
+			makestr.Joinstring(strings.Join(imgpartlist[:len(imgpartlist)-1], "/"), "/", img, ":", tag),
 		)
 	} else {
 		content[0].RepoTags = append(
@@ -176,11 +212,12 @@ func startpull(args []string) {
 	var wg sync.WaitGroup
 	wg = sync.WaitGroup{}
 	wg.Add(len(layers))
-	
+
 	var parentid string
 	var last_fake_layerid string
 	for x, layer := range layers {
 		ublob := layer.(map[string]interface{})["digest"].(string)
+		logtool.SugLog.Info(ublob)
 		fake_layerid := aes.Sha256t(makestr.Joinstring(parentid, "\n", ublob, "\n"))
 		layerdir := makestr.Joinstring(imgdir, "/", fake_layerid)
 		os.Mkdir(layerdir, os.ModePerm)
@@ -228,10 +265,10 @@ func startpull(args []string) {
 
 
 	var content1 map[string](map[string]string)
-	if len(imgparts[:len(imgparts)-1]) !=0{
+	if len(imgpartlist[:len(imgpartlist)-1]) !=0{
 
 		content1 =  map[string](map[string]string){
-			makestr.Joinstring( strings.Join(imgparts[:len(imgparts)-1], "/") ,img) : map[string]string{tag: last_fake_layerid },
+			makestr.Joinstring( strings.Join(imgpartlist[:len(imgpartlist)-1], "/") ,img) : map[string]string{tag: last_fake_layerid },
 		}
 	}else{
 		content1 =  map[string](map[string]string){
@@ -252,15 +289,13 @@ func startpull(args []string) {
 	fmt.Print("Creating archive...")
 	os.Stdout.Sync()
 
-	if check_path.Check_path("./dockertest.tar'").Exists() {
-		os.Remove("./dockertest.tar'")
+	if check_path.Check_path(img+".tar").Exists() {
+		os.Remove(img+".tar")
 	}
-	tartool.TarGz("./dockertest.tar", imgdir)
-	os.RemoveAll(imgdir)
+	tartool.TarGz(img+".tar", imgdir)
+	//os.RemoveAll(imgdir)
+	fmt.Printf("打包完成，生成文件 %v\n",img+".tar" )
 }
-
-
-
 
 
 
@@ -350,8 +385,10 @@ func get_auth_head(qtype string,a ...any ) map[string]string {
 			tm:= t["expires_in"]
 			st:= timetool.Strtorime(tm,"UTC")
 			if st.Add(-2*time.Second).After(time.Now().UTC()){
-				return t 
+				t["Accept"]=qtype
+				return t
 			}
+
 	}
 	resp, err := request.Requests(
 		makestr.Joinstring(auth_url, "?service=", reg_service, "&scope=repository:", repository, ":pull")).
