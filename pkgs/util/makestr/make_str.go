@@ -13,4 +13,16 @@ func Joinstring(strs ...string ) string {
 }
 
 
+
+func Repeat(v string,f string,l int ) string {
+	var b strings.Builder
+	b.WriteString(v)
+	for i := 0; i <= l; i++{
+		b.WriteString(f)
+	}
+	return b.String()
+}
+
+
+
 //go test  -bench=. -benchmem

@@ -3,7 +3,6 @@ package request
 import (
 	"crypto/tls"
 	"encoding/json"
-	"os"
 
 	//"fmt"
 	//"os"
@@ -53,12 +52,6 @@ func (c *reqr) post(i ...string) (*resty.Response, error) {
 
 func Requests(url string) *reqr {
 	client := resty.New()
-	http_proxy := os.Getenv("http_proxy")
-
-	if http_proxy != "" {
-		println(http_proxy)
-	}
-
 	return &reqr{Client: client,
 		Clientr: client.R(),
 		Url:     url}
