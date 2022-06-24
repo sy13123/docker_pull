@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bufio"
-	"sync"
 	"encoding/json"
 	"fmt"
 	"go_pull/pkgs/model"
@@ -18,6 +17,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"github.com/go-resty/resty/v2"
 	"github.com/spf13/cobra"
@@ -31,12 +31,14 @@ var (
 	resp        *resty.Response
 	err         error
 	registry string
-
+	platform string
+	plist bool
 )
-var platform string
+
 func init() {
 	rootCmd.AddCommand(downloadCmd)
 	downloadCmd.PersistentFlags().StringVarP(&platform,"platform","p","amd64","Select platform system architecture")
+	downloadCmd.PersistentFlags().BoolVarP(&plist, "list", "l", false, "list platform system architecture")
 }
 
 var downloadCmd = &cobra.Command{
@@ -120,32 +122,20 @@ func startdownload(args []string) {
 	logtool.Errorerror(err)
 
 	if resp.StatusCode() != 200 {
-		logtool.SugLog.Infof("[-] Cannot fetch manifest for %v [HTTP %v]", repository, resp.Status())
-		logtool.SugLog.Info(resp)
-		auth_head = get_auth_head(
-			"application/vnd.docker.distribution.manifest.list.v2+json",auth_head)
-		resp, err = request.Requests(
-			makestr.Joinstring("https://", registry, "/v2/", repository, "/manifests/", tag)).
-			Setheads(auth_head).
-			Settls().
-			Get()
-		if resp.StatusCode() == 200 {
-			logtool.SugLog.Info("[+] Manifests found for this tag (use the @digest format to pull the corresponding image):")
-			manifests := request.Parsebody_to_json(resp)["manifests"].([]interface{})
-			for _, manifest := range manifests {
-				for key, value := range manifest.(map[string]interface{})["platform"].(map[string]string) {
-					logtool.SugLog.Infof("%v: %v", key, value)
-				}
-				logtool.SugLog.Infof("digest: %v\n", manifest.(map[string]interface{})["digest"])
-			}
-			os.Exit(1)
-		}
+		logtool.SugLog.Fatal("[-] Cannot fetch manifest for %v [HTTP %v]", repository, resp.Status())
 	}
+
 
 	resp_json :=request.Parsebody_to_json(resp)
 
 	var platformv_list []string
 	var platform_digest string
+
+	if plist{
+		data, _ := json.MarshalIndent(resp_json["manifests"],""," ")
+		fmt.Println(string(data))
+		os.Exit(0)
+	}
 	for _,v := range resp_json["manifests"].([]interface{} ) {
 
 		platformv := v.(map[string]interface{})["platform"]
@@ -155,6 +145,8 @@ func startdownload(args []string) {
 			break
 		}
 		platformv_list = append(platformv_list, platformv.(string))
+
+
 	}
 
 	if platform_digest == "" {
@@ -292,7 +284,7 @@ func startdownload(args []string) {
 		os.Remove(img+".tar")
 	}
 	tartool.TarGz(img+".tar", imgdir)
-	//os.RemoveAll(imgdir)
+	os.RemoveAll(imgdir)
 	fmt.Printf("打包完成，生成文件 %v\n",img+".tar" )
 }
 
