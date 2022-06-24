@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
 	"github.com/go-resty/resty/v2"
 	"github.com/spf13/cobra"
 )

@@ -34,7 +34,7 @@ func Time_add(m time.Time, _s string) time.Time {
 }
 
 
-func gettime() {
+func test_gettime() {
 	//获取当前时间
 	t := time.Now() //2018-07-11 15:07:51.8858085 +0800 CST m=+0.004000001
 	fmt.Println(t)
