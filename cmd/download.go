@@ -85,7 +85,11 @@ func startdownload(args []string) {
 	if len(imgpartlist) > 1 && (strings.Contains(imgpartlist[0], ".") || strings.Contains(imgpartlist[0], ":")) {
 		registry = imgpartlist[0]
 		repo = strings.Join(imgpartlist[1:len(imgpartlist)-1], "/")
-	} 
+	} else {
+		if len(imgpartlist[:len(imgpartlist)-1])!= 0{
+			repo = strings.Join(imgpartlist[:len(imgpartlist)-1], "/")
+		}
+	}
 	repository = makestr.Joinstring(repo, "/", img)
 
 	//Get Docker authentication endpoint when it is required
@@ -119,8 +123,7 @@ func startdownload(args []string) {
 		Setheads(auth_head).
 		Settls().
 		Get()
-	logtool.Errorerror(err)
-
+		logtool.Errorerror(err)
 	if resp.StatusCode() != 200 {
 		logtool.SugLog.Fatal("[-] Cannot fetch manifest for %v [HTTP %v]", repository, resp.Status())
 	}
@@ -351,7 +354,7 @@ func Download_img(layer interface{},layerdir string,ublob string,w *sync.WaitGro
 			if err != nil {
 				if err == io.EOF {
 					fmt.Println("")
-					logtool.SugLog.Info("ioFinish")
+					//logtool.SugLog.Info("ioFinish")
 				} else {
 					logtool.SugLog.Fatal(err, "ioerr")
 				}
